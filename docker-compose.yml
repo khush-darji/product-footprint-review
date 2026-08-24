@@ -1,0 +1,79 @@
+name: product-footprint-review
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: footprint-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-footprint}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-footprint}
+      POSTGRES_DB: ${POSTGRES_DB:-footprint_review}
+    ports:
+      # Exposed so `npm run dev` outside Docker can reach the same database.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # Dependants wait on this rather than on the container merely being "started" —
+      # Postgres accepts connections several seconds after the process exists.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-footprint} -d ${POSTGRES_DB:-footprint_review}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-production}
+    container_name: footprint-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 4000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-footprint}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-footprint}
+      POSTGRES_DB: ${POSTGRES_DB:-footprint_review}
+      RUN_MIGRATIONS_ON_BOOT: "true"
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # Read only by `npm run seed` / dist/db/seeds/run-seed.js, which refuses to run
+      # with NODE_ENV=production. The default is the fixture password the README documents.
+      SEED_PASSWORD: ${SEED_PASSWORD:-Password123!}
+    ports:
+      - "${BACKEND_PORT:-4000}:4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Baked in at build time: Next.js inlines NEXT_PUBLIC_* into the client bundle,
+        # so this cannot be supplied at run time.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+    container_name: footprint-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+
+volumes:
+  postgres-data:
