@@ -1,0 +1,44 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    /* node16, not the deprecated node10 ("node"). package.json has no "type" field, so
+     * this still emits and resolves as CommonJS — but it honours dependencies'
+     * "exports" maps, which node10 ignores. `module` and `moduleResolution` must move
+     * together here: TS5110 rejects moduleResolution node16 paired with plain CommonJS. */
+    "module": "node16",
+    "moduleResolution": "node16",
+    /* Required by ts-jest under the node16 module kind, and a fair constraint anyway:
+     * it rejects the few constructs that cannot be compiled one file at a time. */
+    "isolatedModules": true,
+    "types":[
+      "node",
+      "jest"
+    ],
+
+    /* TypeORM entities are decorator-driven and need runtime type metadata. */
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": true,
+
+    /* No `paths` aliases on purpose: the compiled output in dist/ runs under plain
+     * `node`, which does not read tsconfig paths. Relative imports work identically
+     * under tsx, ts-jest and node, so there is nothing to rewrite at build time. */
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

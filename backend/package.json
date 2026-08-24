@@ -1,0 +1,60 @@
+{
+  "name": "product-footprint-review-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "REST API for reviewing supplier product carbon footprint submissions.",
+  "main": "dist/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "jest",
+    "typeorm": "NODE_OPTIONS='--import tsx' typeorm -d src/db/data-source.ts",
+    "migration:run": "npm run typeorm -- migration:run",
+    "migration:revert": "npm run typeorm -- migration:revert",
+    "migration:generate": "npm run typeorm -- migration:generate",
+    "migration:show": "npm run typeorm -- migration:show",
+    "seed": "tsx src/db/seeds/run-seed.ts",
+    "schema:log": "npm run typeorm -- schema:log",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "dependencies": {
+    "argon2": "^0.45.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.6.2",
+    "helmet": "^8.3.0",
+    "pg": "^8.23.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "typeorm": "^1.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.10.1",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^6.0.3",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "jest": "^30.2.0",
+    "pino-pretty": "^13.1.2",
+    "supertest": "^7.1.4",
+    "ts-jest": "^29.4.6",
+    "tsx": "^4.20.7",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0"
+  }
+}
