@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /*
+   * Honours the OS "reduce motion" setting. Vestibular disorders make large or repeated
+   * motion genuinely unpleasant, and this app's motion is decorative — transitions and a
+   * spinner — so removing it costs nothing. `0.01ms` rather than `0` so transitionend
+   * still fires and nothing waiting on it stalls.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Tabular figures keep the emissions column from shifting as digits change width. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
