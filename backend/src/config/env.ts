@@ -5,6 +5,14 @@
  * start rather than the first request that happens to touch it. Import `config` anywhere
  * you need a setting; never reach for `process.env` elsewhere.
  *
+ * **There are no defaults.** Every variable the app needs must be set, which is why an
+ * environment file is required rather than optional — see `.env.example` for the full
+ * list. A default is a value nobody chose and nobody can see, and the ones that used to
+ * live here were silently wrong in any environment that forgot to set them: a rate limit
+ * that never fires, a CORS list pointing at localhost, `RUN_MIGRATIONS_ON_BOOT` deciding
+ * on its own to alter a production schema. The only optional variables are the two that
+ * genuinely are: `DATABASE_URL` and `SEED_PASSWORD`.
+ *
  * Two properties here are deliberate and easy to lose by accident:
  *
  *  - **No message contains the offending value.** Half these variables are credentials,
@@ -49,32 +57,53 @@ interface Env {
 const envSchema = Joi.object<Env>({
   NODE_ENV: Joi.string()
     .valid(...NODE_ENVS)
-    .default("development"),
+    .required(),
   LOG_LEVEL: Joi.string()
     .valid(...LOG_LEVELS)
-    .default("info"),
-  PORT: Joi.number().integer().min(1).max(65_535).default(4000),
+    .required(),
+  PORT: Joi.number().integer().min(1).max(65_535).required(),
 
-  POSTGRES_USER: Joi.string().default("footprint"),
-  POSTGRES_PASSWORD: Joi.string().default("footprint"),
-  POSTGRES_HOST: Joi.string().default("localhost"),
-  POSTGRES_PORT: Joi.number().integer().min(1).max(65_535).default(5432),
-  POSTGRES_DB: Joi.string().default("footprint_review"),
-  /** A full URL wins when supplied; otherwise the discrete parts above are assembled. */
+  /**
+   * A full connection URL. Optional, and the one variable that changes what else is
+   * required: supply it and the discrete parts below are redundant, omit it and they are
+   * how the URL gets built. A hosted database usually hands you the URL and nothing else.
+   */
   DATABASE_URL: Joi.string().uri(),
 
-  DATABASE_SSL: Joi.boolean().default(false),
-  DATABASE_LOGGING: Joi.boolean().default(false),
-  DATABASE_POOL_SIZE: Joi.number().integer().min(1).max(100).default(10),
+  POSTGRES_USER: Joi.string().when("DATABASE_URL", {
+    is: Joi.exist(),
+    then: Joi.optional(),
+    otherwise: Joi.required(),
+  }),
+  POSTGRES_PASSWORD: Joi.string().when("DATABASE_URL", {
+    is: Joi.exist(),
+    then: Joi.optional(),
+    otherwise: Joi.required(),
+  }),
+  POSTGRES_HOST: Joi.string().when("DATABASE_URL", {
+    is: Joi.exist(),
+    then: Joi.optional(),
+    otherwise: Joi.required(),
+  }),
+  POSTGRES_PORT: Joi.number().integer().min(1).max(65_535).when("DATABASE_URL", {
+    is: Joi.exist(),
+    then: Joi.optional(),
+    otherwise: Joi.required(),
+  }),
+  POSTGRES_DB: Joi.string().when("DATABASE_URL", {
+    is: Joi.exist(),
+    then: Joi.optional(),
+    otherwise: Joi.required(),
+  }),
+
+  DATABASE_SSL: Joi.boolean().required(),
+  DATABASE_LOGGING: Joi.boolean().required(),
+  DATABASE_POOL_SIZE: Joi.number().integer().min(1).max(100).required(),
   /* Schema changes go through committed migrations; `synchronize` is never enabled. */
-  RUN_MIGRATIONS_ON_BOOT: Joi.boolean().default(true),
+  RUN_MIGRATIONS_ON_BOOT: Joi.boolean().required(),
 
   /* An explicit allowlist. With `credentials: true` the browser attaches the session
-   * cookie, so reflecting any origin would let any site act as the signed-in user.
-   *
-   * The default is given already split, because Joi does not run `.custom()` over a value
-   * it substituted from `.default()` — a string default would leave `origins` a string,
-   * where `.includes(origin)` silently becomes a substring match. */
+   * cookie, so reflecting any origin would let any site act as the signed-in user. */
   CORS_ORIGINS: Joi.string()
     .custom((value: string) =>
       value
@@ -82,40 +111,39 @@ const envSchema = Joi.object<Env>({
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0),
     )
-    .default(["http://localhost:3000"]),
+    .required(),
 
   RATE_LIMIT_WINDOW_MS: Joi.number()
     .integer()
     .min(1_000)
     .max(24 * 60 * 60_000)
-    .default(15 * 60_000),
-  RATE_LIMIT_MAX_READS: Joi.number().integer().min(1).max(100_000).default(300),
-  RATE_LIMIT_MAX_WRITES: Joi.number().integer().min(1).max(100_000).default(60),
+    .required(),
+  RATE_LIMIT_MAX_READS: Joi.number().integer().min(1).max(100_000).required(),
+  RATE_LIMIT_MAX_WRITES: Joi.number().integer().min(1).max(100_000).required(),
   /* Login is where brute force lives, so it gets a much tighter budget. */
-  RATE_LIMIT_MAX_LOGINS: Joi.number().integer().min(1).max(100_000).default(20),
+  RATE_LIMIT_MAX_LOGINS: Joi.number().integer().min(1).max(100_000).required(),
 
   /** Number of proxies in front of the app. 0 disables `trust proxy`. */
-  TRUST_PROXY_HOPS: Joi.number().integer().min(0).max(10).default(0),
+  TRUST_PROXY_HOPS: Joi.number().integer().min(0).max(10).required(),
 
   /**
-   * Password given to the demo accounts by `npm run seed`. Optional, and deliberately
-   * without a fallback: the seed is the only thing that reads it, so an unset value
-   * should fail the seed with a clear message rather than the whole process at boot.
+   * Password given to the demo accounts by `npm run seed`. Optional because the seed is
+   * the only thing that reads it: an unset value should fail the seed with a clear
+   * message, not stop the whole process from booting.
    */
   SEED_PASSWORD: Joi.string(),
 
   COOKIE_SAME_SITE: Joi.string()
     .valid(...SAME_SITE)
-    .default("lax"),
+    .required(),
 })
   /**
    * `SameSite=none` is only honoured over HTTPS — a browser silently drops such a cookie
    * without `Secure`, which presents as "signing in does nothing". Catching it here turns
    * a baffling runtime symptom into a boot-time message.
    *
-   * Checked at the object level rather than with `.when()` because it has to see
-   * `NODE_ENV` *after* its default is applied, and Joi does not promise sibling keys
-   * resolve in declaration order.
+   * Checked at the object level so both keys are already validated when the rule runs,
+   * rather than as a `.when()` that would depend on sibling resolution order.
    */
   .custom((value: Env, helpers) =>
     value.COOKIE_SAME_SITE === "none" && value.NODE_ENV !== "production"
@@ -130,10 +158,10 @@ const envSchema = Joi.object<Env>({
 /**
  * A blank variable means "not set".
  *
- * `FOO=` in a `.env` file arrives as an empty string, and an operator who commented a
- * value out meant to fall back to the default, not to configure the empty string.
- * Trimming and dropping blanks here applies that once, for every key, before any rule
- * sees a value.
+ * `FOO=` in a `.env` file arrives as an empty string, and nobody means by that to
+ * configure the empty string. Dropping blanks here means such a variable fails its
+ * `required()` check with "is required" rather than passing as `""` and surfacing later
+ * as an empty database name or an origin allowlist that matches nothing.
  */
 const present: Record<string, string> = {};
 for (const [key, value] of Object.entries(process.env)) {

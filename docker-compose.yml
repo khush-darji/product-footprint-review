@@ -33,6 +33,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # src/config/env.ts has no defaults, so every required variable is listed here — a
+    # missing one fails the container at boot rather than at the first request that needs
+    # it. The `${VAR:-fallback}` defaults are Compose's, for the developer running this
+    # locally without a .env beside it; they are not the app's.
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 4000
@@ -42,8 +46,19 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-footprint}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-footprint}
       POSTGRES_DB: ${POSTGRES_DB:-footprint_review}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      DATABASE_LOGGING: ${DATABASE_LOGGING:-false}
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-10}
       RUN_MIGRATIONS_ON_BOOT: "true"
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
+      RATE_LIMIT_MAX_READS: ${RATE_LIMIT_MAX_READS:-300}
+      RATE_LIMIT_MAX_WRITES: ${RATE_LIMIT_MAX_WRITES:-60}
+      RATE_LIMIT_MAX_LOGINS: ${RATE_LIMIT_MAX_LOGINS:-20}
+      # 0 because nothing sits in front of the backend in this compose file. Trusting a
+      # proxy that is not there lets a client spoof its IP and evade the rate limiter.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
       # Read only by `npm run seed` / dist/db/seeds/run-seed.js, which refuses to run
       # with NODE_ENV=production. The default is the fixture password the README documents.
       SEED_PASSWORD: ${SEED_PASSWORD:-Password123!}

@@ -32,12 +32,12 @@ product-footprint-review/
 │   │   ├── db/             DataSource, migrations, seeds
 │   │   ├── domain/         framework-free rules — access.ts holds the whole model
 │   │   ├── entities/       TypeORM entities
-│   │   ├── schemas/        Zod request schemas (the boundary contract)
+│   │   ├── schemas/        Joi request schemas (the boundary contract)
 │   │   ├── repositories/   the only place queries live
 │   │   ├── services/       business logic, no HTTP
 │   │   ├── routes/         parse, call a service, respond
 │   │   ├── mappers/        entity -> API response
-│   │   ├── middleware/     request id, auth, validation, errors
+│   │   ├── middleware/     request id, auth, errors
 │   │   ├── lib/            logger, errors, pagination
 │   │   ├── app.ts          Express wiring (no listen)
 │   │   └── server.ts       boot + graceful shutdown
@@ -59,10 +59,16 @@ product-footprint-review/
 
 **From a fresh checkout, yes — both paths below start at `git clone` with nothing else
 prepared.** The Docker path needs only Docker and takes no configuration at all: every
-variable has a working default in `docker-compose.yml`. The local path needs Node 20.9+
-(Next 16's floor) and Docker for Postgres, and the two `cp .env.example` lines are the
-whole setup — no value in either file has to be edited to run locally. Both `.env` files
-are gitignored, which is why they are copied rather than shipped.
+variable is supplied in `docker-compose.yml`. The local path needs Node 20.9+ (Next 16's
+floor) and Docker for Postgres, and the two `cp .env.example` lines are the whole setup —
+no value in either file has to be edited to run locally. Both `.env` files are gitignored,
+which is why they are copied rather than shipped.
+
+`backend/src/config/env.ts` has **no defaults**: every variable it names must be set, so a
+missing one fails the process at boot with the full list rather than surfacing later as a
+rate limiter that never fires or a CORS allowlist pointing at the wrong host.
+`.env.example` is therefore the complete required set. (`backend/.env.test` is committed
+rather than copied, so the test suite boots from a fresh checkout.)
 
 ### Everything in Docker (nothing else required)
 
@@ -398,7 +404,7 @@ docker compose -f ../docker-compose.yml up -d postgres   # tests need a real dat
 npm test
 ```
 
-**75 tests across 5 suites**, run against a real Postgres — not mocks. That is a
+**103 tests across 7 suites**, run against a real Postgres — not mocks. That is a
 deliberate choice: the risk here is concentrated in the access-scoped SQL and the
 row-locked review transaction, and neither survives being mocked. A stubbed repository
 would happily "prove" a viewer cannot approve while the actual WHERE clause leaked every
@@ -428,7 +434,7 @@ Everything below was run against a real Postgres and a real browser.
 
 | Check | Result |
 |---|---|
-| `npm test` (backend) | 75 passed, 5 suites |
+| `npm test` (backend) | 103 passed, 7 suites |
 | `npx tsc --noEmit` (backend, frontend) | passes |
 | `npm run lint` (backend, frontend) | passes |
 | `npm run build` (backend, frontend) | passes |
