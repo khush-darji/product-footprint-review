@@ -174,6 +174,37 @@ export function parseReviewFootprint(input: unknown): ReviewFootprintInput {
   return { decision, comment };
 }
 
+/**
+ * How many submissions one bulk request may decide.
+ *
+ * Each id costs a locking transaction, so the cap is what stops a single request from
+ * holding the connection — and rows other reviewers are waiting on — indefinitely. The
+ * UI pages at 25, so a full page and then some fits in one call.
+ */
+export const BULK_REVIEW_MAX_IDS = 100;
+
+export interface BulkReviewInput {
+  ids: string[];
+  decision: (typeof REVIEW_DECISIONS)[number];
+  comment: string | null;
+}
+
+export function parseBulkReview(input: unknown): BulkReviewInput {
+  const fields = new Fields(input);
+
+  const ids = fields.uuidArray("ids", { max: BULK_REVIEW_MAX_IDS });
+  const decision = fields.enum("decision", REVIEW_DECISIONS, {
+    message: 'decision must be "approved" or "rejected"',
+  });
+  // One comment for the whole batch — a bulk decision has one reason behind it ("missing
+  // verification evidence"), and it is recorded against every submission in the batch.
+  // Wording a distinct note per submission is what the single-submission endpoint is for.
+  const comment = fields.nullableText("comment", { max: 2_000 });
+
+  fields.done();
+  return { ids, decision, comment };
+}
+
 export interface ListReviewsQuery {
   limit: number;
 }

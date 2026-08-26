@@ -87,6 +87,26 @@ export interface ReviewEventDto {
   createdAt: string;
 }
 
+/** One submission a bulk review could not decide, and why. */
+export interface BulkReviewFailureDto {
+  id: string;
+  /** The same `code` the single-submission endpoint would have returned. */
+  code: string;
+  message: string;
+}
+
+/**
+ * The outcome of a bulk review, submission by submission.
+ *
+ * A bulk decision is not all-or-nothing: one submission a colleague already approved
+ * must not throw away the reviewer's other nineteen decisions. Both lists are returned
+ * so the UI can update the rows that moved and say what happened to the rest.
+ */
+export interface BulkReviewResultDto {
+  succeeded: ProductFootprintDto[];
+  failed: BulkReviewFailureDto[];
+}
+
 /** Aggregate counts for the queue header. */
 export interface FootprintStatsDto {
   total: number;

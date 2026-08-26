@@ -12,12 +12,14 @@ import { Router, type Request, type Response } from "express";
 import { currentUser } from "../middleware/auth";
 import { validate, validated } from "../middleware/validate";
 import {
+  parseBulkReview,
   parseCreateFootprint,
   parseListFootprintsQuery,
   parseListReviewsQuery,
   parseReviewFootprint,
   parseUpdateFootprint,
   parseUuidParam,
+  type BulkReviewInput,
   type CreateFootprintInput,
   type ListFootprintsQuery,
   type ListReviewsQuery,
@@ -74,6 +76,24 @@ footprintRouter.post(
     const { body } = validated<CreateFootprintInput>(res);
     const created = await footprintService.createFootprint(currentUser(res), body);
     res.status(201).location(`/api/v1/footprints/${created.id}`).json(created);
+  },
+);
+
+/**
+ * POST /api/v1/footprints/bulk-review — decide several submissions at once.
+ *
+ * Declared before `/:id/...` so the literal segment is matched as itself, for the same
+ * reason `/stats` is above. 200 even when some ids failed: the response body reports
+ * each one, because "twelve approved, two already decided" is not an error — it is the
+ * answer. Only a request that is wrong as a whole (bad decision, non-UUID id, over the
+ * cap) is a 400.
+ */
+footprintRouter.post(
+  "/bulk-review",
+  validate({ body: parseBulkReview }),
+  async (_req: Request, res: Response) => {
+    const { body } = validated<BulkReviewInput>(res);
+    res.json(await footprintService.bulkReview(currentUser(res), body));
   },
 );
 

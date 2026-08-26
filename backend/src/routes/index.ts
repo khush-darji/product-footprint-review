@@ -28,6 +28,7 @@ apiRouter.get("/", (_req: Request, res: Response) => {
       updateFootprint: "PATCH /api/v1/footprints/:id",
       deleteFootprint: "DELETE /api/v1/footprints/:id",
       reviewFootprint: "POST /api/v1/footprints/:id/review",
+      bulkReviewFootprints: "POST /api/v1/footprints/bulk-review",
       listReviewEvents: "GET /api/v1/footprints/:id/reviews",
       listShares: "GET /api/v1/footprints/:id/shares",
       grantShare: "POST /api/v1/footprints/:id/shares",
