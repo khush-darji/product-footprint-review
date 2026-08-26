@@ -6,6 +6,7 @@
  */
 import type {
   ApiErrorBody,
+  BulkReviewResult,
   FootprintListResponse,
   FootprintStats,
   ProductFootprint,
@@ -185,6 +186,24 @@ export function reviewFootprint(
   return request<ProductFootprint>(`/footprints/${id}/review`, {
     method: "POST",
     body: { decision, comment: comment?.trim() || null },
+  });
+}
+
+/**
+ * Decide several submissions at once, with one comment recorded against all of them.
+ *
+ * Resolves rather than throws when some ids could not be decided — the result carries
+ * `succeeded` and `failed`, and a caller that only checks for a thrown error will report
+ * a partial batch as a complete success.
+ */
+export function bulkReviewFootprints(
+  ids: string[],
+  decision: ReviewDecision,
+  comment?: string,
+): Promise<BulkReviewResult> {
+  return request<BulkReviewResult>("/footprints/bulk-review", {
+    method: "POST",
+    body: { ids, decision, comment: comment?.trim() || null },
   });
 }
 
