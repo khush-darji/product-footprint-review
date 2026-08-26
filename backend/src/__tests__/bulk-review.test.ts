@@ -47,7 +47,12 @@ describe("validation", () => {
       .send({ ids: [footprint.id, "fp-001"], decision: "approved" });
 
     expect(res.status).toBe(400);
+    expect(res.body.error.details).toHaveLength(1);
     expect(res.body.error.details[0].path).toBe("ids[1]");
+    // The message has to name the index too. Reporting "ids must be a UUID" against a
+    // hundred-id batch tells the client which field was wrong but not which value, and
+    // a second error about the array as a whole is noise on top of that.
+    expect(res.body.error.details[0].message).toBe("ids[1] must be a UUID");
   });
 
   it("rejects a batch over the cap rather than doing unbounded work", async () => {

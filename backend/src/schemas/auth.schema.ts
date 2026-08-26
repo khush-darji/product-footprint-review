@@ -1,4 +1,5 @@
-import { Fields } from "../lib/validation";
+import Joi from "joi";
+import { email, parser, text } from "../lib/validation";
 
 export interface SignInInput {
   email: string;
@@ -16,15 +17,9 @@ export interface SignInInput {
  * The upper bound is not cosmetic — argon2 hashes whatever it is given, so an unbounded
  * password is unbounded CPU work an attacker can request for free.
  */
-export function parseSignIn(input: unknown): SignInInput {
-  const fields = new Fields(input);
-
-  const email = fields.email("email", { max: 200, message: "Enter a valid email address" });
-  const password = fields.string("password", {
-    max: 200,
-    message: "Enter your password",
-  });
-
-  fields.done();
-  return { email, password };
-}
+export const parseSignIn = parser<SignInInput>(
+  Joi.object({
+    email: email("Enter a valid email address"),
+    password: text("password", 200, "Enter your password"),
+  }),
+);
