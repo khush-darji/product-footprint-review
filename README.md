@@ -146,6 +146,7 @@ cookie, set by `POST /api/v1/auth/login`.
 | PATCH | `/api/v1/footprints/:id` | Correct a submission that is still pending |
 | DELETE | `/api/v1/footprints/:id` | Delete → 204, cascades to the review timeline |
 | POST | `/api/v1/footprints/:id/review` | Approve or reject |
+| POST | `/api/v1/footprints/bulk-review` | Approve or reject up to 100 at once |
 | GET | `/api/v1/footprints/:id/reviews` | The submission's decision timeline |
 | GET | `/api/v1/footprints/:id/shares` | Who it is shared with (owner only) |
 | POST | `/api/v1/footprints/:id/shares` | Grant or change access (owner only) |
@@ -155,6 +156,14 @@ cookie, set by `POST /api/v1/auth/login`.
 product and supplier), `scope` (`all`/`owned`/`shared`), `category`, `supplier`,
 `highRiskOnly`, `sort` (`submittedAt`/`emissionsValue`/`uncertaintyPercent`), `order`
 (`asc`/`desc`), `limit` (1–100, default 25), `cursor`.
+
+**Bulk review** takes `{ ids, decision, comment }` — one decision and one comment applied
+to every id — and answers `200` with `{ succeeded, failed }`. It is deliberately not
+all-or-nothing: each submission is decided under its own row lock, and one that somebody
+else decided first (or that the caller may only view) is reported in `failed` with the
+same error `code` the single-submission endpoint would have returned, rather than
+discarding the decisions that did succeed. Only a request that is wrong as a whole — a
+bad `decision`, a non-UUID id, more than 100 ids — is a `400`.
 
 
 Errors all use one envelope, and the `requestId` matches the `x-request-id` response
