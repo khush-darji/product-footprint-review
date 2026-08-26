@@ -7,7 +7,7 @@ export interface GrantShareInput {
   role: (typeof SHAREABLE_ROLES)[number];
 }
 
-export const grantShareSchema = Joi.object({
+export const grantShareSchema = Joi.object<GrantShareInput>({
   email: email("Enter the email address of the person to share with"),
   // `owner` is deliberately not in SHAREABLE_ROLES: ownership is not transferable here,
   // so asking for it is a validation error rather than a silently ignored field.
@@ -20,7 +20,7 @@ export interface ShareParams {
   userId: string;
 }
 
-export const shareParamsSchema = Joi.object({
+export const shareParamsSchema = Joi.object<ShareParams>({
   id: uuid(),
   userId: uuid(),
 });

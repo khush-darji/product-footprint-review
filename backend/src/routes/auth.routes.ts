@@ -14,8 +14,8 @@ import {
   SESSION_COOKIE,
   sessionCookieOptions,
 } from "../middleware/auth";
-import { validate, validated } from "../middleware/validate";
-import { signInSchema, type SignInInput } from "../schemas/auth.schema";
+import { parse } from "../lib/validation";
+import { signInSchema } from "../schemas/auth.schema";
 import { signIn, signOut } from "../services/auth.service";
 
 export const authRouter = Router();
@@ -42,9 +42,8 @@ const loginLimiter = rateLimit({
 authRouter.post(
   "/login",
   loginLimiter,
-  validate({ body: signInSchema }),
-  async (_req: Request, res: Response) => {
-    const { body } = validated<{ body: SignInInput }>(res);
+  async (req: Request, res: Response) => {
+    const body = parse(signInSchema, req.body);
     const result = await signIn(body.email, body.password);
 
     res.cookie(SESSION_COOKIE, result.token, sessionCookieOptions());

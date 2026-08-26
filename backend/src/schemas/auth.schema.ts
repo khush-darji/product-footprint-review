@@ -17,7 +17,7 @@ export interface SignInInput {
  * The upper bound is not cosmetic — argon2 hashes whatever it is given, so an unbounded
  * password is unbounded CPU work an attacker can request for free.
  */
-export const signInSchema = Joi.object({
+export const signInSchema = Joi.object<SignInInput>({
   email: email("Enter a valid email address"),
   password: text("password", 200, "Enter your password"),
 });

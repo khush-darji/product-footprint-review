@@ -39,7 +39,7 @@ export interface UuidParam {
   id: string;
 }
 
-export const uuidParamSchema = Joi.object({ id: uuid() });
+export const uuidParamSchema = Joi.object<UuidParam>({ id: uuid() });
 
 export interface ListFootprintsQuery {
   status: (typeof STATUS_FILTERS)[number];
@@ -54,7 +54,7 @@ export interface ListFootprintsQuery {
   cursor?: string | undefined;
 }
 
-export const listFootprintsQuerySchema = Joi.object({
+export const listFootprintsQuerySchema = Joi.object<ListFootprintsQuery>({
   // `all` is an explicit "no status filter" rather than an omission.
   status: oneOf("status", STATUS_FILTERS).default("all"),
   q: optionalText("q", 200),
@@ -101,7 +101,7 @@ const submittedAt = Joi.date()
     "date.future": "submittedAt cannot be in the future",
   });
 
-export const createFootprintSchema = Joi.object({
+export const createFootprintSchema = Joi.object<CreateFootprintInput>({
   product: text("product", 200),
   supplier: text("supplier", 200),
   category: text("category", 100),
@@ -130,7 +130,7 @@ export type UpdateFootprintInput = Partial<
   >
 >;
 
-export const updateFootprintSchema = Joi.object({
+export const updateFootprintSchema = Joi.object<UpdateFootprintInput>({
   product: text("product", 200).optional(),
   supplier: text("supplier", 200).optional(),
   category: text("category", 100).optional(),
@@ -149,7 +149,7 @@ export interface ReviewFootprintInput {
   comment: string | null;
 }
 
-export const reviewFootprintSchema = Joi.object({
+export const reviewFootprintSchema = Joi.object<ReviewFootprintInput>({
   decision: decision(),
   // Optional on both decisions — the decision itself is the signal that matters, and a
   // reviewer rejecting an obviously bad submission should not be blocked on prose.
@@ -171,7 +171,7 @@ export interface BulkReviewInput {
   comment: string | null;
 }
 
-export const bulkReviewSchema = Joi.object({
+export const bulkReviewSchema = Joi.object<BulkReviewInput>({
   ids: Joi.array()
     .items(uuidItem())
     .min(1)
@@ -200,6 +200,6 @@ export interface ListReviewsQuery {
   limit: number;
 }
 
-export const listReviewsQuerySchema = Joi.object({
+export const listReviewsQuerySchema = Joi.object<ListReviewsQuery>({
   limit: boundedInt("limit", 1, 100, 50),
 });
