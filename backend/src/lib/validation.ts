@@ -1,85 +1,15 @@
 /**
- * Request validation, on Joi.
+ * The rule vocabulary the schemas are built from.
  *
- * Schemas live in `src/schemas/` and are compiled here into the `Parser<T>` the
- * `validate()` middleware expects — a function from `unknown` to a typed value that
- * throws `ValidationError` when the input is wrong. The middleware and the routes are
- * unaware Joi exists.
- *
- * Three options carry the security properties this layer is responsible for, and none of
- * them is a default worth losing:
- *
- *  - **`stripUnknown`** is what prevents mass assignment. A key no schema names is
- *    removed before the value reaches a service, so a client cannot approve its own
- *    submission by posting `{ status: "approved" }` to the create endpoint. Note this
- *    *drops* unknown keys rather than rejecting them: clients that send a field the API
- *    has retired keep working, and the field still cannot reach the database.
- *  - **`abortEarly: false`** reports every problem at once, so a client fixes its request
- *    in one round trip rather than one field per attempt.
- *  - **`convert`** (Joi's default) is what lets a query string — where everything arrives
- *    as text — yield a real number and a real boolean.
- */
-import Joi from "joi";
-import { ValidationError } from "./errors";
-
-export interface ValidationIssue {
-  path: string;
-  message: string;
-}
-
-const OPTIONS: Joi.ValidationOptions = {
-  abortEarly: false,
-  stripUnknown: true,
-  convert: true,
-  // Joi quotes labels as "value" by default; the messages here are written as whole
-  // sentences naming the field, so the quoting only gets in the way.
-  errors: { wrap: { label: false } },
-};
-
-/**
- * Joi reports a path as segments — `["ids", 1]` — but the API's error envelope carries a
- * string, and a client needs to know *which* element of an array was wrong. Numbers
- * become `[1]` and names are dot-joined, so `ids[1]` and `page.size` read the way a
- * developer would write them.
- */
-function formatPath(segments: readonly (string | number)[]): string {
-  return segments.reduce<string>((acc, segment) => {
-    if (typeof segment === "number") return `${acc}[${segment}]`;
-    return acc.length > 0 ? `${acc}.${segment}` : segment;
-  }, "");
-}
-
-function toIssues(error: Joi.ValidationError): ValidationIssue[] {
-  return error.details.map((detail) => ({
-    path: formatPath(detail.path),
-    message: detail.message,
-  }));
-}
-
-/**
- * Turns a schema into the parser the routes pass to `validate()`.
- *
- * The generic is the *output* type. Joi cannot prove its schema produces `T`, so the
- * cast here is the one place that trust is placed; the schemas and their exported
- * interfaces are written side by side to keep it honest.
- */
-export function parser<T>(schema: Joi.Schema): (input: unknown) => T {
-  return (input: unknown): T => {
-    // `ValidationResult` is a union whose failure branch types `value` as `any`, so the
-    // error is checked before `value` is touched. Destructuring both at once would pull
-    // that `any` straight through into the caller.
-    const result = schema.validate(input, OPTIONS) as Joi.ValidationResult<T>;
-    if (result.error) throw new ValidationError("Invalid request", toIssues(result.error));
-    return result.value;
-  };
-}
-
-/* --- Shared rules -----------------------------------------------------------------
+ * No Joi is *run* here — `middleware/validate.ts` is the only place that calls
+ * `validate()`. These are just the shared, bounded building blocks, so that a limit or
+ * a message is defined once rather than re-typed per field.
  *
  * Bounds are not cosmetic. An unbounded string or array is a denial of service that
  * needs no exploit, so every rule below carries a limit and every schema is built from
  * these rather than from bare Joi types.
  */
+import Joi from "joi";
 
 /**
  * RFC 4122 v4, which is what `PrimaryGeneratedColumn("uuid")` produces.

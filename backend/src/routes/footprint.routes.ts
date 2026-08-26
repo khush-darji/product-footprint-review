@@ -12,13 +12,13 @@ import { Router, type Request, type Response } from "express";
 import { currentUser } from "../middleware/auth";
 import { validate, validated } from "../middleware/validate";
 import {
-  parseBulkReview,
-  parseCreateFootprint,
-  parseListFootprintsQuery,
-  parseListReviewsQuery,
-  parseReviewFootprint,
-  parseUpdateFootprint,
-  parseUuidParam,
+  bulkReviewSchema,
+  createFootprintSchema,
+  listFootprintsQuerySchema,
+  listReviewsQuerySchema,
+  reviewFootprintSchema,
+  updateFootprintSchema,
+  uuidParamSchema,
   type BulkReviewInput,
   type CreateFootprintInput,
   type ListFootprintsQuery,
@@ -28,8 +28,8 @@ import {
   type UuidParam,
 } from "../schemas/footprint.schema";
 import {
-  parseGrantShare,
-  parseShareParams,
+  grantShareSchema,
+  shareParamsSchema,
   type GrantShareInput,
   type ShareParams,
 } from "../schemas/share.schema";
@@ -44,9 +44,9 @@ export const footprintRouter = Router();
  */
 footprintRouter.get(
   "/",
-  validate({ query: parseListFootprintsQuery }),
+  validate({ query: listFootprintsQuerySchema }),
   async (_req: Request, res: Response) => {
-    const { query } = validated<unknown, ListFootprintsQuery>(res);
+    const { query } = validated<{ query: ListFootprintsQuery }>(res);
     const result = await footprintService.listFootprints(currentUser(res), query);
 
     res.json({
@@ -71,9 +71,9 @@ footprintRouter.get("/stats", async (_req: Request, res: Response) => {
 /** POST /api/v1/footprints — the caller owns what they create. */
 footprintRouter.post(
   "/",
-  validate({ body: parseCreateFootprint }),
+  validate({ body: createFootprintSchema }),
   async (_req: Request, res: Response) => {
-    const { body } = validated<CreateFootprintInput>(res);
+    const { body } = validated<{ body: CreateFootprintInput }>(res);
     const created = await footprintService.createFootprint(currentUser(res), body);
     res.status(201).location(`/api/v1/footprints/${created.id}`).json(created);
   },
@@ -90,9 +90,9 @@ footprintRouter.post(
  */
 footprintRouter.post(
   "/bulk-review",
-  validate({ body: parseBulkReview }),
+  validate({ body: bulkReviewSchema }),
   async (_req: Request, res: Response) => {
-    const { body } = validated<BulkReviewInput>(res);
+    const { body } = validated<{ body: BulkReviewInput }>(res);
     res.json(await footprintService.bulkReview(currentUser(res), body));
   },
 );
@@ -100,9 +100,9 @@ footprintRouter.post(
 /** GET /api/v1/footprints/:id — 404 if not owned by or shared with the caller. */
 footprintRouter.get(
   "/:id",
-  validate({ params: parseUuidParam }),
+  validate({ params: uuidParamSchema }),
   async (_req: Request, res: Response) => {
-    const { params } = validated<unknown, unknown, UuidParam>(res);
+    const { params } = validated<{ params: UuidParam }>(res);
     res.json(await footprintService.getFootprint(currentUser(res), params.id));
   },
 );
@@ -110,9 +110,9 @@ footprintRouter.get(
 /** PATCH /api/v1/footprints/:id — owner or editor, while still pending. */
 footprintRouter.patch(
   "/:id",
-  validate({ params: parseUuidParam, body: parseUpdateFootprint }),
+  validate({ params: uuidParamSchema, body: updateFootprintSchema }),
   async (_req: Request, res: Response) => {
-    const { params, body } = validated<UpdateFootprintInput, unknown, UuidParam>(res);
+    const { params, body } = validated<{ body: UpdateFootprintInput; params: UuidParam }>(res);
     res.json(await footprintService.updateFootprint(currentUser(res), params.id, body));
   },
 );
@@ -120,9 +120,9 @@ footprintRouter.patch(
 /** DELETE /api/v1/footprints/:id — owner only. 204, cascades to shares and timeline. */
 footprintRouter.delete(
   "/:id",
-  validate({ params: parseUuidParam }),
+  validate({ params: uuidParamSchema }),
   async (_req: Request, res: Response) => {
-    const { params } = validated<unknown, unknown, UuidParam>(res);
+    const { params } = validated<{ params: UuidParam }>(res);
     await footprintService.deleteFootprint(currentUser(res), params.id);
     res.status(204).send();
   },
@@ -131,9 +131,9 @@ footprintRouter.delete(
 /** POST /api/v1/footprints/:id/review — owner or editor. Viewers get 403. */
 footprintRouter.post(
   "/:id/review",
-  validate({ params: parseUuidParam, body: parseReviewFootprint }),
+  validate({ params: uuidParamSchema, body: reviewFootprintSchema }),
   async (_req: Request, res: Response) => {
-    const { params, body } = validated<ReviewFootprintInput, unknown, UuidParam>(res);
+    const { params, body } = validated<{ body: ReviewFootprintInput; params: UuidParam }>(res);
     res.json(await footprintService.reviewFootprint(currentUser(res), params.id, body));
   },
 );
@@ -141,9 +141,9 @@ footprintRouter.post(
 /** GET /api/v1/footprints/:id/reviews — the decision timeline. Any role may read it. */
 footprintRouter.get(
   "/:id/reviews",
-  validate({ params: parseUuidParam, query: parseListReviewsQuery }),
+  validate({ params: uuidParamSchema, query: listReviewsQuerySchema }),
   async (_req: Request, res: Response) => {
-    const { params, query } = validated<unknown, ListReviewsQuery, UuidParam>(res);
+    const { params, query } = validated<{ query: ListReviewsQuery; params: UuidParam }>(res);
     res.json({
       items: await footprintService.listReviewEvents(currentUser(res), params.id, query),
     });
@@ -155,9 +155,9 @@ footprintRouter.get(
 /** GET /api/v1/footprints/:id/shares — who this submission is shared with. */
 footprintRouter.get(
   "/:id/shares",
-  validate({ params: parseUuidParam }),
+  validate({ params: uuidParamSchema }),
   async (_req: Request, res: Response) => {
-    const { params } = validated<unknown, unknown, UuidParam>(res);
+    const { params } = validated<{ params: UuidParam }>(res);
     res.json({ items: await shareService.listShares(currentUser(res), params.id) });
   },
 );
@@ -165,9 +165,9 @@ footprintRouter.get(
 /** POST /api/v1/footprints/:id/shares — grant, or change an existing grant's role. */
 footprintRouter.post(
   "/:id/shares",
-  validate({ params: parseUuidParam, body: parseGrantShare }),
+  validate({ params: uuidParamSchema, body: grantShareSchema }),
   async (_req: Request, res: Response) => {
-    const { params, body } = validated<GrantShareInput, unknown, UuidParam>(res);
+    const { params, body } = validated<{ body: GrantShareInput; params: UuidParam }>(res);
     const share = await shareService.grantShare(currentUser(res), params.id, body);
     res.status(201).json(share);
   },
@@ -176,9 +176,9 @@ footprintRouter.post(
 /** DELETE /api/v1/footprints/:id/shares/:userId — revoke one person's access. */
 footprintRouter.delete(
   "/:id/shares/:userId",
-  validate({ params: parseShareParams }),
+  validate({ params: shareParamsSchema }),
   async (_req: Request, res: Response) => {
-    const { params } = validated<unknown, unknown, ShareParams>(res);
+    const { params } = validated<{ params: ShareParams }>(res);
     await shareService.revokeShare(currentUser(res), params.id, params.userId);
     res.status(204).send();
   },
