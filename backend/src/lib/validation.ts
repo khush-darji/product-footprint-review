@@ -126,6 +126,43 @@ export class Fields {
   }
 
   /**
+   * A non-empty list of UUIDs, as a bulk endpoint takes.
+   *
+   * Each element is reported against its own index, so a client that sends one bad id
+   * learns which one it was instead of being told "ids is invalid". The upper bound is
+   * required rather than optional: an unbounded list is an unbounded amount of work for
+   * one request, which is the same denial of service an unbounded page size would be.
+   *
+   * Duplicates are collapsed. Left in, the second copy of an id would be reviewed
+   * against a row the first copy had just decided, and report itself as a conflict.
+   */
+  uuidArray(path: string, opts: { max: number }): string[] {
+    const value = this.raw(path);
+    if (!Array.isArray(value)) {
+      this.add(path, `${path} must be an array of ids`);
+      return [];
+    }
+    if (value.length === 0) {
+      this.add(path, `${path} must contain at least one id`);
+      return [];
+    }
+    if (value.length > opts.max) {
+      this.add(path, `${path} must contain at most ${opts.max} ids`);
+      return [];
+    }
+
+    const ids = new Set<string>();
+    value.forEach((entry: unknown, index: number) => {
+      if (typeof entry !== "string" || !UUID_V4.test(entry)) {
+        this.add(`${path}[${index}]`, `${path}[${index}] must be a UUID`);
+        return;
+      }
+      ids.add(entry);
+    });
+    return [...ids];
+  }
+
+  /**
    * Query strings carry everything as text, so a numeric query parameter has to be
    * coerced. `Number("")` is 0 and `Number("abc")` is NaN — both are rejected.
    */

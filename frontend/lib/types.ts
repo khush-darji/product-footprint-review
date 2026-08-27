@@ -64,6 +64,25 @@ export interface ReviewEvent {
   createdAt: string;
 }
 
+/** One submission a bulk review could not decide, and why. */
+export interface BulkReviewFailure {
+  id: string;
+  code: string;
+  message: string;
+}
+
+/**
+ * The outcome of a bulk review, submission by submission.
+ *
+ * A bulk decision is not all-or-nothing — a submission somebody else decided first is
+ * reported here rather than failing the whole request — so the UI has to render both
+ * lists, not just check for an error.
+ */
+export interface BulkReviewResult {
+  succeeded: ProductFootprint[];
+  failed: BulkReviewFailure[];
+}
+
 export interface Share {
   footprintId: string;
   role: ShareableRole;
