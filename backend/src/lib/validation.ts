@@ -1,304 +1,217 @@
 /**
- * Request validation, hand-rolled.
+ * Validation at the HTTP boundary.
  *
- * `Fields` collects every problem instead of throwing on the first, so a client gets the
- * whole list back in one response rather than fixing one field per round trip. Each
- * reader returns a typed value and records an issue when the input is wrong.
+ * `parse()` is the only thing in the codebase that runs a Joi schema. A handler calls it
+ * on its first line, so the raw request is converted to a typed value before anything
+ * else happens, and a failure throws — Express 5 forwards a rejected async handler to the
+ * error middleware, so every rejection comes back in the same 400 envelope without a
+ * single `try/catch` in a route.
  *
- * The important property is what the *parsers* built on this do: they construct their
- * result field by field, so a key nobody asked for cannot survive into the output. That
- * is what stops a client sending `{ status: "approved" }` to an endpoint that has no
- * business accepting it — mass assignment is prevented by never copying the input
- * object, not by filtering it afterwards.
+ * The type comes back from the schema itself. Schemas are declared as
+ * `Joi.object<CreateFootprintInput>({...})`, so `parse(createFootprintSchema, req.body)`
+ * infers its result and the shape is written down exactly once.
+ *
+ * The options are the interesting part, because each one is a property the API depends on:
+ *
+ *  - **`stripUnknown`** is what prevents mass assignment. A key no schema names is
+ *    removed before the value reaches a service, so a client cannot approve its own
+ *    submission by posting `{ status: "approved" }` to the create endpoint. Note it
+ *    *drops* unknown keys rather than rejecting them, so a client still sending a field
+ *    the API has retired keeps working — and that field still cannot reach the database.
+ *  - **`abortEarly: false`** reports every problem at once, so a client fixes its request
+ *    in one round trip rather than one field per attempt.
+ *  - **`convert`** (Joi's default) is what lets a query string — where everything arrives
+ *    as text — yield a real number and a real boolean.
+ *
+ * The rest of this file is the shared rule vocabulary the schemas are assembled from, so
+ * that a bound or a message is defined once rather than re-typed per field. Bounds are
+ * not cosmetic: an unbounded string or array is a denial of service that needs no
+ * exploit, so every rule below carries a limit.
  */
+import Joi from "joi";
 import { ValidationError } from "./errors";
 
-export interface ValidationIssue {
-  path: string;
-  message: string;
+const OPTIONS: Joi.ValidationOptions = {
+  abortEarly: false,
+  stripUnknown: true,
+  convert: true,
+  // Joi quotes labels as "value" by default; the rules below write messages as whole
+  // sentences naming the field, so the quoting only gets in the way.
+  errors: { wrap: { label: false } },
+};
+
+/**
+ * Joi reports a path as segments — `["ids", 1]` — but the error envelope carries a
+ * string, and a client needs to know *which* element of an array was wrong. Numbers
+ * become `[1]` and names are dot-joined, so `ids[1]` and `page.size` read the way a
+ * developer would write them.
+ */
+function formatPath(segments: readonly (string | number)[]): string {
+  return segments.reduce<string>((acc, segment) => {
+    if (typeof segment === "number") return `${acc}[${segment}]`;
+    return acc.length > 0 ? `${acc}.${segment}` : segment;
+  }, "");
 }
 
-/** RFC 4122 v4, which is what `PrimaryGeneratedColumn("uuid")` produces. */
-const UUID_V4 =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+/** Validates one part of a request, or throws the 400 the error handler turns into JSON. */
+export function parse<T>(schema: Joi.ObjectSchema<T>, input: unknown): T {
+  // `ValidationResult` is a union whose failure branch types `value` as `any`, so the
+  // error is checked before `value` is touched.
+  const result = schema.validate(input, OPTIONS);
+  if (result.error) {
+    throw new ValidationError(
+      "Invalid request",
+      result.error.details.map((detail) => ({
+        path: formatPath(detail.path),
+        message: detail.message,
+      })),
+    );
+  }
+  return result.value;
+}
+
+/**
+ * RFC 4122 v4, which is what `PrimaryGeneratedColumn("uuid")` produces.
+ *
+ * The message uses Joi's own label rather than a caller-supplied one, because the label
+ * is the only thing that knows *where* the value sat: `id` for an object key, but
+ * `ids[3]` for the fourth element of an array. Hardcoding a name would tell a client
+ * which field was wrong but not which of its hundred ids.
+ */
+const uuidRule = Joi.string()
+  .guid({ version: "uuidv4" })
+  .messages({
+    "any.required": "{{#label}} must be a UUID",
+    "string.base": "{{#label}} must be a UUID",
+    "string.empty": "{{#label}} must be a UUID",
+    "string.guid": "{{#label}} must be a UUID",
+  });
+
+/** A required UUID, for an object key. */
+export const uuid = () => uuidRule.required();
+
+/**
+ * A UUID as an element of an array — deliberately *not* required.
+ *
+ * `.required()` means something different inside `.items()`: it makes the item a value
+ * the array must **contain**, so one malformed element produces a second, confusing
+ * error against the array itself ("does not contain 1 required value(s)") on top of the
+ * one against the element. Emptiness is `.min(1)`'s job, not the item's.
+ */
+export const uuidItem = () => uuidRule;
 
 /**
  * Deliberately permissive. A regex cannot decide whether an address is real — only
  * delivery can — so this rejects the obviously malformed and leaves the rest to the
- * lookup that follows.
+ * lookup that follows. `tlds: false` keeps Joi from consulting its built-in TLD list,
+ * which would reject perfectly valid internal domains.
  */
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-export class Fields {
-  private readonly issues: ValidationIssue[] = [];
-  private readonly source: Record<string, unknown>;
-
-  constructor(input: unknown) {
-    // A JSON body can legitimately be any type; anything that is not an object has no
-    // fields to read, so every required reader will report itself missing.
-    this.source =
-      typeof input === "object" && input !== null && !Array.isArray(input)
-        ? (input as Record<string, unknown>)
-        : {};
-  }
-
-  private raw(path: string): unknown {
-    return this.source[path];
-  }
-
-  private add(path: string, message: string): void {
-    this.issues.push({ path, message });
-  }
-
-  /** Records a problem discovered by the caller, e.g. a cross-field rule. */
-  reject(path: string, message: string): void {
-    this.add(path, message);
-  }
-
-  private present(path: string): boolean {
-    const value = this.raw(path);
-    return value !== undefined && value !== null && value !== "";
-  }
-
-  string(
-    path: string,
-    opts: { min?: number; max: number; message?: string } = { max: 255 },
-  ): string {
-    const value = this.raw(path);
-    if (typeof value !== "string") {
-      this.add(path, opts.message ?? `${path} is required`);
-      return "";
-    }
-
-    const trimmed = value.trim();
-    const min = opts.min ?? 1;
-    if (trimmed.length < min) {
-      this.add(path, opts.message ?? `${path} is required`);
-      return trimmed;
-    }
-    if (trimmed.length > opts.max) {
-      this.add(path, `${path} must be at most ${opts.max} characters`);
-    }
-    return trimmed;
-  }
-
-  optionalString(path: string, opts: { max: number }): string | undefined {
-    if (!this.present(path)) return undefined;
-    return this.string(path, { max: opts.max });
-  }
-
-  /**
-   * Free text where an empty string means "not provided", not "set to empty" — so
-   * clearing a comment and omitting one land in the database identically.
-   */
-  nullableText(path: string, opts: { max: number }): string | null {
-    const value = this.raw(path);
-    if (value === undefined || value === null) return null;
-    if (typeof value !== "string") {
-      this.add(path, `${path} must be text`);
-      return null;
-    }
-
-    const trimmed = value.trim();
-    if (trimmed.length === 0) return null;
-    if (trimmed.length > opts.max) {
-      this.add(path, `${path} must be at most ${opts.max} characters`);
-    }
-    return trimmed;
-  }
-
-  number(path: string, opts: { min: number; max: number; integer?: boolean }): number {
-    const value = this.raw(path);
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      this.add(path, `${path} must be a number`);
-      return opts.min;
-    }
-    if (opts.integer && !Number.isInteger(value)) {
-      this.add(path, `${path} must be a whole number`);
-      return opts.min;
-    }
-    if (value < opts.min) {
-      this.add(path, `${path} must be at least ${opts.min}`);
-    } else if (value > opts.max) {
-      this.add(path, `${path} must be at most ${opts.max}`);
-    }
-    return value;
-  }
-
-  /**
-   * A non-empty list of UUIDs, as a bulk endpoint takes.
-   *
-   * Each element is reported against its own index, so a client that sends one bad id
-   * learns which one it was instead of being told "ids is invalid". The upper bound is
-   * required rather than optional: an unbounded list is an unbounded amount of work for
-   * one request, which is the same denial of service an unbounded page size would be.
-   *
-   * Duplicates are collapsed. Left in, the second copy of an id would be reviewed
-   * against a row the first copy had just decided, and report itself as a conflict.
-   */
-  uuidArray(path: string, opts: { max: number }): string[] {
-    const value = this.raw(path);
-    if (!Array.isArray(value)) {
-      this.add(path, `${path} must be an array of ids`);
-      return [];
-    }
-    if (value.length === 0) {
-      this.add(path, `${path} must contain at least one id`);
-      return [];
-    }
-    if (value.length > opts.max) {
-      this.add(path, `${path} must contain at most ${opts.max} ids`);
-      return [];
-    }
-
-    const ids = new Set<string>();
-    value.forEach((entry: unknown, index: number) => {
-      if (typeof entry !== "string" || !UUID_V4.test(entry)) {
-        this.add(`${path}[${index}]`, `${path}[${index}] must be a UUID`);
-        return;
-      }
-      ids.add(entry);
+export const email = (message: string, max = 200) =>
+  Joi.string()
+    .trim()
+    .max(max)
+    .email({ tlds: false })
+    .required()
+    .messages({
+      "any.required": message,
+      "string.base": message,
+      "string.empty": message,
+      "string.email": message,
+      "string.max": `email must be at most ${max} characters`,
     });
-    return [...ids];
-  }
 
-  /**
-   * Query strings carry everything as text, so a numeric query parameter has to be
-   * coerced. `Number("")` is 0 and `Number("abc")` is NaN — both are rejected.
-   */
-  intFromQuery(
-    path: string,
-    opts: { min: number; max: number; fallback: number },
-  ): number {
-    if (!this.present(path)) return opts.fallback;
+/** A required, trimmed, length-bounded string. */
+export const text = (label: string, max: number, message?: string) =>
+  Joi.string()
+    .trim()
+    .max(max)
+    .required()
+    .messages({
+      "any.required": message ?? `${label} is required`,
+      "string.base": message ?? `${label} is required`,
+      "string.empty": message ?? `${label} is required`,
+      "string.max": `${label} must be at most ${max} characters`,
+    });
 
-    const raw = this.raw(path);
-    if (typeof raw !== "string" && typeof raw !== "number") {
-      this.add(path, `${path} must be a number`);
-      return opts.fallback;
-    }
+/**
+ * An optional query string value, where empty means absent.
+ *
+ * `?q=` and no `q` at all mean the same thing to a filter, so `.empty("")` collapses
+ * them into `undefined` rather than searching for the empty string.
+ */
+export const optionalText = (label: string, max: number) =>
+  Joi.string()
+    .trim()
+    .empty("")
+    .max(max)
+    .messages({ "string.max": `${label} must be at most ${max} characters` });
 
-    const value = Number(raw);
-    if (!Number.isInteger(value)) {
-      this.add(path, `${path} must be a whole number`);
-      return opts.fallback;
-    }
-    if (value < opts.min) {
-      this.add(path, `${path} must be at least ${opts.min}`);
-      return opts.fallback;
-    }
-    if (value > opts.max) {
-      this.add(path, `${path} must be at most ${opts.max}`);
-      return opts.fallback;
-    }
-    return value;
-  }
+/**
+ * Free text where an empty string means "not provided", not "set to empty" — so clearing
+ * a comment and omitting one land in the database identically. An explicit `null` is
+ * allowed and preserved, which is what lets an update *clear* a field.
+ *
+ * No default: a create schema adds `.default(null)` so the column is written, while an
+ * update schema leaves it off so an absent key stays absent and the column is untouched.
+ * That distinction is the whole difference between "clear this" and "leave it alone".
+ */
+export const nullableText = (label: string, max: number) =>
+  Joi.string()
+    .trim()
+    .empty("")
+    .max(max)
+    .allow(null)
+    .messages({
+      "string.base": `${label} must be text`,
+      "string.max": `${label} must be at most ${max} characters`,
+    });
 
-  enum<T extends string>(
-    path: string,
-    allowed: readonly T[],
-    opts: { fallback?: T; message?: string } = {},
-  ): T {
-    if (!this.present(path) && opts.fallback !== undefined) return opts.fallback;
+export const boundedNumber = (label: string, min: number, max: number) =>
+  Joi.number()
+    .min(min)
+    .max(max)
+    .required()
+    .messages({
+      "any.required": `${label} must be a number`,
+      "number.base": `${label} must be a number`,
+      "number.min": `${label} must be at least ${min}`,
+      "number.max": `${label} must be at most ${max}`,
+    });
 
-    const value = this.raw(path);
-    if (typeof value !== "string" || !allowed.includes(value as T)) {
-      this.add(
-        path,
-        opts.message ??
-          `${path} must be one of ${allowed.map((option) => `"${option}"`).join(", ")}`,
-      );
-      return opts.fallback ?? allowed[0]!;
-    }
-    return value as T;
-  }
+/** A query-string integer with a default, e.g. `limit`. */
+export const boundedInt = (label: string, min: number, max: number, fallback: number) =>
+  Joi.number()
+    .integer()
+    .min(min)
+    .max(max)
+    .default(fallback)
+    .messages({
+      "number.base": `${label} must be a number`,
+      "number.integer": `${label} must be a whole number`,
+      "number.min": `${label} must be at least ${min}`,
+      "number.max": `${label} must be at most ${max}`,
+    });
 
-  /** `"true"` in a query string means true; anything else absent means the fallback. */
-  boolFromQuery(path: string, fallback: boolean): boolean {
-    if (!this.present(path)) return fallback;
-
-    const value = this.raw(path);
-    if (value === "true" || value === true) return true;
-    if (value === "false" || value === false) return false;
-
-    this.add(path, `${path} must be "true" or "false"`);
-    return fallback;
-  }
-
-  uuid(path: string, message?: string): string {
-    const value = this.raw(path);
-    if (typeof value !== "string" || !UUID_V4.test(value)) {
-      this.add(path, message ?? `${path} must be a UUID`);
-      return "";
-    }
-    return value;
-  }
-
-  email(path: string, opts: { max: number; message?: string }): string {
-    const value = this.raw(path);
-    if (typeof value !== "string") {
-      this.add(path, opts.message ?? `${path} must be an email address`);
-      return "";
-    }
-
-    const trimmed = value.trim();
-    if (trimmed.length > opts.max) {
-      this.add(path, `${path} must be at most ${opts.max} characters`);
-      return trimmed;
-    }
-    if (!EMAIL.test(trimmed)) {
-      this.add(path, opts.message ?? `${path} must be an email address`);
-    }
-    return trimmed;
-  }
-
-  /**
-   * An ISO 8601 timestamp. `new Date("nonsense")` is an Invalid Date rather than a
-   * throw, so the NaN check is what actually does the rejecting.
-   */
-  optionalIsoDate(path: string, message: string): Date | undefined {
-    if (!this.present(path)) return undefined;
-
-    const value = this.raw(path);
-    if (typeof value !== "string") {
-      this.add(path, message);
-      return undefined;
-    }
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      this.add(path, message);
-      return undefined;
-    }
-    return date;
-  }
-
-  /** True when the input carried a usable (non-empty) value for this field. */
-  has(path: string): boolean {
-    return this.present(path);
-  }
-
-  /**
-   * True when the key was supplied at all, even as null or "".
-   *
-   * The difference from `has` matters for a nullable field: omitting `supplierNotes`
-   * means "leave it alone", whereas sending `null` means "clear it".
-   */
-  hasKey(path: string): boolean {
-    return Object.hasOwn(this.source, path);
-  }
-
-  get failed(): boolean {
-    return this.issues.length > 0;
-  }
-
-  /**
-   * Throws if anything went wrong. The error carries every issue, and the central error
-   * handler turns it into a 400 with the same envelope every other failure uses.
-   */
-  done(): void {
-    if (this.issues.length > 0) {
-      throw new ValidationError("Invalid request", this.issues);
-    }
-  }
-}
+/**
+ * One of a fixed set.
+ *
+ * `values` is typed `readonly T[]` so the allowlists in `domain/` can be passed straight
+ * in — the set the API accepts and the set the domain defines are then the same object,
+ * and adding a member in one place without the other is a compile error.
+ */
+export const oneOf = <T extends string>(
+  label: string,
+  values: readonly T[],
+  message?: string,
+) => {
+  const fallbackMessage =
+    message ?? `${label} must be one of ${values.map((v) => `"${v}"`).join(", ")}`;
+  return Joi.string()
+    .valid(...values)
+    .messages({
+      "any.required": fallbackMessage,
+      "any.only": fallbackMessage,
+      "string.base": fallbackMessage,
+      "string.empty": fallbackMessage,
+    });
+};

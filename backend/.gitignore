@@ -3,5 +3,9 @@ dist
 .env
 .env.*
 !.env.example
+# Committed on purpose: config/env.ts has no defaults, so the suite cannot boot without
+# this file, and the README promises `npm test` works from a fresh checkout. It holds no
+# secrets -- a scratch database and the same fixture credentials as .env.example.
+!.env.test
 coverage
 *.log
